@@ -7,5 +7,6 @@
   "requirements": [],
   "version": "1.0.0",
   "iot_class": "local_polling",
+  "config_flow": true,
   "issue_tracker": "https://github.com/home-assistant/core/issues"
 }

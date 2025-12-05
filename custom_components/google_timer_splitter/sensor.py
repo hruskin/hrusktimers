@@ -1,51 +1,34 @@
-"""
-Platform for splitting Google Home timers into individual sensors.
-
-For more details about this platform, please refer to the documentation at
-https://www.home-assistant.io/integrations/sensor/
-"""
+"""Platform for splitting Google Home timers into individual sensors."""
 import logging
 from datetime import timedelta
 
-import voluptuous as vol
-
-from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import (
-    EVENT_HOMEASSISTANT_START,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
 )
 from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.helpers.event import async_track_state_change_event
-import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.device_registry import DeviceInfo
 import homeassistant.util.dt as dt_util
+
+from .const import DOMAIN, CONF_SOURCE, NUM_TIMER_SENSORS
 
 _LOGGER = logging.getLogger(__name__)
 
-DOMAIN = "google_timer_splitter"
-CONF_SOURCE = "source"
-NUM_TIMER_SENSORS = 4
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
-    {
-        vol.Required(CONF_SOURCE): cv.entity_id,
-    }
-)
-
-
-async def async_setup_platform(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config: ConfigType,
+    entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
-    """Set up the Google Timer Splitter sensor platform."""
-    source_entity_id = config[CONF_SOURCE]
+    """Set up the Google Timer Splitter sensor platform from a config entry."""
+    source_entity_id = entry.data[CONF_SOURCE]
 
     sensors = [
-        GoogleTimerSplitterSensor(hass, source_entity_id, i)
+        GoogleTimerSplitterSensor(hass, entry, source_entity_id, i)
         for i in range(NUM_TIMER_SENSORS)
     ]
 
@@ -70,18 +53,15 @@ async def async_setup_platform(
         else:
             _LOGGER.debug("Source entity %s is unavailable.", source_entity_id)
 
-        _LOGGER.debug("Updating timer sensors with data: %s", timers_data)
         for sensor in sensors:
             sensor.update_from_source(timers_data)
 
     # Listen for changes to the source entity
-    async_track_state_change_event(hass, [source_entity_id], _update_sensors)
-
-    # Schedule a call to update sensors once Home Assistant is started.
-    # The lambda is used to pass no arguments to _update_sensors.
-    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, lambda _: _update_sensors())
+    entry.async_on_unload(
+        async_track_state_change_event(hass, [source_entity_id], _update_sensors)
+    )
     
-    # Perform an initial update in case the source is already available
+    # Perform an initial update
     _update_sensors()
 
 
@@ -89,17 +69,23 @@ class GoogleTimerSplitterSensor(SensorEntity):
     """Representation of a single timer slot sensor."""
 
     def __init__(
-        self, hass: HomeAssistant, source_entity_id: str, slot_index: int
+        self, hass: HomeAssistant, entry: ConfigEntry, source_entity_id: str, slot_index: int
     ) -> None:
         """Initialize the sensor."""
         self.hass = hass
         self._source_entity_id = source_entity_id
         self._slot_index = slot_index
-
+        
         self._attr_name = f"Minutka {self._slot_index + 1}"
-        self._attr_unique_id = f"{DOMAIN}_timer_{self._slot_index + 1}"
+        self._attr_unique_id = f"{entry.entry_id}_{self._slot_index + 1}"
         self._attr_icon = "mdi:timer-outline"
         self._attr_should_poll = False
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name="Google Timer Splitter",
+            manufacturer="hruskin",
+            entry_type="service",
+        )
         
         # Set initial state
         self._set_idle_state()
@@ -153,10 +139,12 @@ class GoogleTimerSplitterSensor(SensorEntity):
                         "start_time": start_time_dt.isoformat(),
                         "remaining": remaining_sec,
                     }
-                    self.async_write_ha_state()
+                    if self.hass:
+                        self.async_write_ha_state()
                     return
 
         # This part is reached if no timer data for the slot, status is not 'set',
         # or data is invalid.
         self._set_idle_state()
-        self.async_write_ha_state()
+        if self.hass:
+            self.async_write_ha_state()
