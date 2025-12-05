@@ -1,0 +1,11 @@
+{
+  "domain": "google_timer_splitter",
+  "name": "Google Timer Splitter",
+  "documentation": "https://www.home-assistant.io/integrations/sensor",
+  "dependencies": [],
+  "codeowners": [],
+  "requirements": [],
+  "version": "1.0.0",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/home-assistant/core/issues"
+}
